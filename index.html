@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta name="build-commit" content="privjson-20260901-3d67322f1b7d">
+<meta name="build-commit" content="privjson-20260901-77fe5493018b">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PrivJSON — Private JSON Viewer for Large Files (Local &amp; Open Source)</title>
@@ -179,8 +179,17 @@ function toPath(stack){
 
 /* ---------------- Worker source (inline blob) ---------------- */
 const WORKER_SRC = String.raw`
-const BIG = "__privjson_bigint__";
+let BIG = "__privjson_bigint__";
 function parseLossless(text){
+  // Sentinel collision guard: ensure BIG not present in original text
+  if (text.includes(BIG)) {
+    let suffix = "_" + Math.random().toString(36).slice(2) + "_";
+    BIG = "__privjson_bigint" + suffix + "__";
+    while (text.includes(BIG)) {
+      suffix = "_" + Math.random().toString(36).slice(2) + "_";
+      BIG = "__privjson_bigint" + suffix + "__";
+    }
+  }
   const bigs = new Map(); let i = 0;
   let out = ""; let pos = 0; let inStr = false, esc = false;
   const n = text.length; let idx = 0;
