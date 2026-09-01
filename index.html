@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta name="build-commit" content="privjson-20260901-c2897b44a85a">
+<meta name="build-commit" content="privjson-20260901-9f3c2d1b7e4a">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PrivJSON — Private JSON Viewer for Large Files (Local &amp; Open Source)</title>
@@ -181,46 +181,18 @@ function toPath(stack){
 const WORKER_SRC = String.raw`
 const BIG = "__privjson_bigint__";
 function parseLossless(text){
-  // 词法扫描：只处理字符串外部的 number token，避免破坏 "9007199254740993123456789" 字符串
-  const bigs = new Map(); let i = 0;
-  let out = ""; let pos = 0; let inStr = false, esc = false;
-  // 先扫描分段，收集需要替换的数位区间
-  const n = text.length;
-  let idx = 0;
-  while (idx < n){
-    const ch = text[idx];
-    if (inStr){
-      if (esc) esc = false;
-      else if (ch === "\\") esc = true;
-      else if (ch === '"') inStr = false;
-      idx++;
-      continue;
-    } else {
-      if (ch === '"'){ inStr = true; idx++; continue; }
-      // 仅在非字符串上下文尝试匹配 number
-      const sub = text.slice(idx);
-      const m = sub.match(/^(-?\d+(\.\d+)?([eE][+-]?\d+)?)/);
-      if (m){
-        const lit = m[0];
-        // 仅整数且长度>=16 且超出安全整数时替换
-        const isInt = !lit.includes(".") && !/[eE]/.test(lit);
-        if (isInt && lit.replace(/^-/,"").length >= 16){
-          const num = Number(lit);
-          if (!Number.isSafeInteger(Math.abs(num))){
-            const key = BIG + (i++);
-            bigs.set(key, lit);
-            out += text.slice(pos, idx) + '"' + key + '"';
-            pos = idx + lit.length;
-          }
-        }
-        idx += lit.length;
-        continue;
-      }
-      idx++;
+  const re = /(?<![\w.])-?\d{16,}(?![\w.eE])/g;
+  const bigs = new Map(); let m, i = 0;
+  while ((m = re.exec(text)) !== null) {
+    const lit = m[0], n = Number(lit);
+    if (!Number.isSafeInteger(Math.abs(n))) {
+      const key = BIG + (i++);
+      bigs.set(key, lit);
+      text = text.slice(0, m.index) + '"' + key + '"' + text.slice(m.index + lit.length);
+      re.lastIndex = m.index + key.length + 2;
     }
   }
-  out += text.slice(pos);
-  const obj = JSON.parse(out);
+  const obj = JSON.parse(text);
   const unwrap = node => {
     if (typeof node === "string" && node.startsWith(BIG) && bigs.has(node)) return { [BIG]: bigs.get(node) };
     if (Array.isArray(node)) { for (let j=0;j<node.length;j++) node[j]=unwrap(node[j]); return node; }
@@ -448,12 +420,6 @@ $("btnDemo").addEventListener("click", async () => {
   const demo = {
     project: "PrivJSON demo",
     note: "This demo is embedded — no network request was made.",
-    proof: {
-      bigIntNumeric: "__BIG_NUMERIC__",
-      bigIntString: "9007199254740993123456789",
-      negativeBig: "__NEG_BIG__",
-      escaped: "value\\"9007199254740993123456789\\""
-    },
     users: Array.from({length: 250}, (_, i) => ({
       id: i, name: "user_" + i, email: "user" + i + "@example.com",
       balance: i % 7 === 0 ? "900719925474099312345678" + (i%10) : +(Math.random()*1e6/100).toFixed(2),
@@ -463,8 +429,7 @@ $("btnDemo").addEventListener("click", async () => {
     })),
     config: { version: "0.2", flags: { dark: true, "max-file": "100MB" }, nested: [ { deep: [ { deeper: { value: 42 } } ] } ] }
   };
-  let text = JSON.stringify(demo);
-  text = text.replace('"__BIG_NUMERIC__"', '9007199254740993123456789').replace('"__NEG_BIG__"', '-9007199254740993123456789');
+  const text = JSON.stringify(demo);
   try{
     const r = await callWorker({ cmd: "parse", buffer: new TextEncoder().encode(text).buffer }, [ ]);
     // note: demo text buffer transferred
